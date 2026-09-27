@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     deepgram_api_key: str = ""
     deepgram_stt_model: str = "nova-3"
     deepgram_tts_voice: str = "aura-2-thalia-en"
+    # Seconds of silence after the player stops talking before their answer is final.
+    voice_turn_timeout: float = 1.2
+    voice_session_timeout: int = 900
 
     # LLM (via LiteLLM). Gemini on Vertex by default.
     llm_model: str = "vertex_ai/gemini-2.5-flash"
