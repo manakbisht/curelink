@@ -35,10 +35,8 @@ logger = logging.getLogger(__name__)
 def build_user_turns(settings: Settings) -> UserTurnProcessor:
     return UserTurnProcessor(
         user_turn_strategies=UserTurnStrategies(
-            start=[
-                VADUserTurnStartStrategy(enable_interruptions=False),
-                TranscriptionUserTurnStartStrategy(enable_interruptions=False),
-            ],
+            # The player can barge in: bot audio stops as soon as they start talking.
+            start=[VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()],
             # Players pause between words while recalling; give them time before
             # treating silence as the end of their answer.
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=settings.voice_turn_timeout)],

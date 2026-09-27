@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
@@ -172,3 +173,51 @@ async def test_host_reactions_lead_into_deterministic_facts():
     said = spoken(down)
     assert said[0].startswith("<greeting Ada> I'll read out some words.")
     assert said[1] == "<correct Ada> That's 20 more points. Round 2. Your 3 words are: tiger, rocket, violin. Your turn."
+
+
+class TestInterruptions:
+    async def test_barge_in_during_sequence_replays_it_without_scoring(self):
+        processor, gateway, said, _ = await play(
+            [
+                UserStartedSpeakingFrame(),
+                InterruptionFrame(),
+                BotStoppedSpeakingFrame(),  # audio was cut off
+                transcript("apple"),  # early, incomplete answer
+                UserStoppedSpeakingFrame(),
+                SleepFrame(0.05),
+            ]
+        )
+
+        assert gateway.submissions == []
+        assert said[-1] == "No problem, let me start that again. Round 1. Your 2 words are: apple, banana. Your turn."
+        assert processor.phase is Phase.PRESENTING
+
+    async def test_round_is_scored_once_after_an_interrupted_replay(self):
+        processor, gateway, said, _ = await play(
+            [
+                InterruptionFrame(),
+                BotStoppedSpeakingFrame(),
+                *user_says("wait"),
+                BotStoppedSpeakingFrame(),  # replay finished
+                *user_says("apple banana"),
+            ]
+        )
+
+        assert [(t, r) for _, t, r in gateway.submissions] == [("apple banana", 1)]
+        assert "Round 2." in said[-1]
+
+    async def test_cut_off_sequence_is_replayed_even_if_nothing_was_transcribed(self):
+        _, gateway, said, _ = await play(
+            [InterruptionFrame(), BotStoppedSpeakingFrame(), UserStartedSpeakingFrame(), UserStoppedSpeakingFrame(), SleepFrame(0.05)]
+        )
+
+        assert gateway.submissions == []
+        assert said[-1].startswith("No problem, let me start that again. Round 1.")
+
+    async def test_interruption_while_listening_is_just_the_answer_starting(self):
+        processor, gateway, _, _ = await play(
+            [BotStoppedSpeakingFrame(), InterruptionFrame(), *user_says("apple banana")]
+        )
+
+        assert len(gateway.submissions) == 1
+        assert processor.phase is Phase.PRESENTING  # reading round 2
