@@ -1,0 +1,219 @@
+"""The voice game host: turns conversation events into game-service calls.
+
+This processor only manages turn-taking (when to speak, when to listen,
+which user turn counts as an answer). Correctness, score and progression
+are decided by the game service behind `GameGateway`.
+"""
+
+import asyncio
+import enum
+import logging
+import uuid
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
+    DataFrame,
+    Frame,
+    InputAudioRawFrame,
+    InterimTranscriptionFrame,
+    OutputTransportMessageUrgentFrame,
+    TranscriptionFrame,
+    TTSSpeakFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from sqlalchemy.exc import DBAPIError
+
+from app.cache.redis import GameCache
+from app.core.config import Settings
+from app.models.database import SessionFactory
+from app.schemas.round import ResponseResult
+from app.schemas.session import GameState
+from app.services.game_service import GameService, normalize_transcript
+from app.services.session_service import SessionService
+from app.voice import prompts
+
+logger = logging.getLogger(__name__)
+
+REPEAT_REQUESTS = frozenset({"repeat", "again", "repeat please", "say again", "say it again", "one more time"})
+
+
+@dataclass
+class StartGameFrame(DataFrame):
+    """Queued once the browser is connected: greet the player and read the first sequence."""
+
+
+@dataclass
+class UserTurnEndedFrame(DataFrame):
+    """Internal marker. `UserStoppedSpeakingFrame` is a system frame and can overtake
+    transcripts still queued as data frames; re-queuing the turn end as a data frame
+    guarantees every transcript of the turn has been collected before it is evaluated."""
+
+
+class Phase(enum.StrEnum):
+    IDLE = "idle"  # not started yet
+    PRESENTING = "presenting"  # bot is reading the sequence
+    LISTENING = "listening"  # waiting for the player's answer
+    EVALUATING = "evaluating"  # answer handed to the game service
+    FINISHED = "finished"  # game over
+
+
+class GameGateway(Protocol):
+    """The slice of the game backend the voice bot needs."""
+
+    async def get_state(self) -> GameState: ...
+
+    async def submit(self, response_id: uuid.UUID, transcript: str, round_number: int) -> ResponseResult: ...
+
+
+class DatabaseGameGateway:
+    """GameGateway backed by SessionService, one short DB transaction per call."""
+
+    def __init__(self, session_id: uuid.UUID, cache: GameCache, settings: Settings, attempts: int = 3) -> None:
+        self.session_id = session_id
+        self.cache = cache
+        self.settings = settings
+        self.attempts = attempts
+
+    async def get_state(self) -> GameState:
+        async with SessionFactory() as db:
+            return await SessionService(GameService(db, self.settings), self.cache).get_state(self.session_id)
+
+    async def submit(self, response_id: uuid.UUID, transcript: str, round_number: int) -> ResponseResult:
+        # Transient DB errors are retried with the *same* response id, so a retry
+        # after a commit whose acknowledgement was lost cannot score twice.
+        for attempt in range(1, self.attempts + 1):
+            try:
+                async with SessionFactory() as db:
+                    service = SessionService(GameService(db, self.settings), self.cache)
+                    return await service.submit_response(self.session_id, response_id, transcript, round_number)
+            except DBAPIError:
+                if attempt == self.attempts:
+                    raise
+                logger.warning("submit attempt %s failed, retrying", attempt, exc_info=True)
+                await asyncio.sleep(0.2 * attempt)
+        raise AssertionError("unreachable")
+
+
+class MemoryGameProcessor(FrameProcessor):
+    """Sits between user-turn detection and TTS.
+
+    Downstream it receives transcripts and user-turn boundaries, upstream it
+    receives bot speaking events from the output transport. It emits
+    `TTSSpeakFrame`s for the bot's lines and JSON messages for the UI.
+    """
+
+    def __init__(self, gateway: GameGateway, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.gateway = gateway
+        self.phase = Phase.IDLE
+        self.state: GameState | None = None
+        self._transcripts: list[str] = []
+        # Serialises game actions so two user turns can never be evaluated concurrently.
+        self._lock = asyncio.Lock()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, InputAudioRawFrame):
+            return  # consumed by VAD/STT upstream; nothing downstream needs it
+        if isinstance(frame, StartGameFrame):
+            self.create_task(self._locked(self._introduce()), "introduce")
+            return
+        if isinstance(frame, UserTurnEndedFrame):
+            self.create_task(self._locked(self._on_user_turn_end()), "user_turn_end")
+            return
+        if isinstance(frame, TranscriptionFrame):
+            # Never forward transcripts: the TTS service would read them aloud.
+            self._transcripts.append(frame.text)
+            await self._notify({"type": "transcript", "text": frame.text, "final": True})
+            return
+        if isinstance(frame, InterimTranscriptionFrame):
+            await self._notify({"type": "transcript", "text": frame.text, "final": False})
+            return
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._notify({"type": "user_speaking", "speaking": True})
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._notify({"type": "user_speaking", "speaking": False})
+            await self.queue_frame(UserTurnEndedFrame())
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._on_bot_stopped_speaking()
+
+    # -- conversation flow ---------------------------------------------------
+
+    async def _introduce(self) -> None:
+        self.state = await self.gateway.get_state()
+        if not self.state.is_active or not self.state.sequence:
+            await self._set_phase(Phase.FINISHED)
+            await self._say(prompts.game_already_over())
+            return
+        intro = prompts.greeting(self.state.player_name) if self.state.current_round == 1 else ""
+        await self._present(intro)
+
+    async def _present(self, lead_in: str = "") -> None:
+        """Read the current round's sequence. The player may answer once it has been fully spoken."""
+        assert self.state is not None and self.state.sequence
+        await self._set_phase(Phase.PRESENTING)
+        text = prompts.present_sequence(self.state.current_round, self.state.sequence)
+        await self._say(f"{lead_in} {text}".strip())
+
+    async def _on_bot_stopped_speaking(self) -> None:
+        if self.phase is Phase.PRESENTING:
+            # Anything heard while the bot was talking is not an answer.
+            self._transcripts.clear()
+            await self._set_phase(Phase.LISTENING)
+
+    async def _on_user_turn_end(self) -> None:
+        transcript = " ".join(self._transcripts).strip()
+        if self.phase is not Phase.LISTENING or not transcript:
+            return
+        self._transcripts.clear()
+
+        if " ".join(normalize_transcript(transcript)) in REPEAT_REQUESTS:
+            await self._present(prompts.repeat())
+            return
+
+        await self._evaluate(transcript)
+
+    async def _evaluate(self, transcript: str) -> None:
+        assert self.state is not None
+        await self._set_phase(Phase.EVALUATING)
+        # One id per answer: every retry of this submission is the same response.
+        result = await self.gateway.submit(uuid.uuid4(), transcript, self.state.current_round)
+        self.state = await self.gateway.get_state()
+        await self._notify({"type": "result", **result.model_dump(mode="json")})
+
+        if result.is_correct and self.state.is_active:
+            await self._present(prompts.correct(result.points_awarded))
+        elif result.is_correct:
+            await self._set_phase(Phase.FINISHED)
+            await self._say(prompts.completed(result.score))
+        else:
+            await self._set_phase(Phase.FINISHED)
+            await self._say(prompts.wrong(result.expected, result.score))
+
+    # -- helpers ---------------------------------------------------------------
+
+    async def _locked(self, coro) -> None:
+        async with self._lock:
+            try:
+                await coro
+            except Exception:
+                logger.exception("voice game action failed")
+                await self._notify({"type": "error", "message": "Something went wrong on our side."})
+
+    async def _say(self, text: str) -> None:
+        await self.push_frame(TTSSpeakFrame(text, append_to_context=False))
+
+    async def _set_phase(self, phase: Phase) -> None:
+        self.phase = phase
+        await self._notify({"type": "phase", "phase": phase.value})
+
+    async def _notify(self, message: dict[str, Any]) -> None:
+        await self.push_frame(OutputTransportMessageUrgentFrame(message=message))
