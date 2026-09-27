@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     DataFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     OutputTransportMessageUrgentFrame,
@@ -115,9 +115,16 @@ class DatabaseGameGateway:
 class MemoryGameProcessor(FrameProcessor):
     """Sits between user-turn detection and TTS.
 
-    Downstream it receives transcripts and user-turn boundaries, upstream it
-    receives bot speaking events from the output transport. It emits
-    `TTSSpeakFrame`s for the bot's lines and JSON messages for the UI.
+    It receives transcripts and user-turn boundaries from upstream and a
+    `playback_done` message from the browser once the bot's audio has finished
+    playing there. It emits `TTSSpeakFrame`s for the bot's lines and JSON
+    messages for the UI.
+
+    The browser, not `BotStoppedSpeakingFrame`, decides when the sequence has
+    been heard: the websocket transport sends audio faster than real time, so
+    the server considers the bot finished while the browser is still playing
+    it. Opening the answer window early would turn a barge-in near the end of
+    the sequence into a scored answer.
     """
 
     def __init__(self, gateway: GameGateway, host: Host | None = None, **kwargs: Any) -> None:
@@ -157,8 +164,8 @@ class MemoryGameProcessor(FrameProcessor):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._notify({"type": "user_speaking", "speaking": False})
             await self.queue_frame(UserTurnEndedFrame())
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._on_bot_stopped_speaking()
+        elif isinstance(frame, InputTransportMessageFrame) and _message_type(frame) == "playback_done":
+            await self._on_playback_done()
         elif isinstance(frame, InterruptionFrame):
             await self._on_interruption()
 
@@ -180,7 +187,7 @@ class MemoryGameProcessor(FrameProcessor):
         text = prompts.present_sequence(self.state.current_round, self.state.sequence)
         await self._say(f"{lead_in} {text}".strip())
 
-    async def _on_bot_stopped_speaking(self) -> None:
+    async def _on_playback_done(self) -> None:
         if self.phase is Phase.PRESENTING:
             # Anything heard while the bot was talking is not an answer.
             self._transcripts.clear()
@@ -253,3 +260,7 @@ class MemoryGameProcessor(FrameProcessor):
 
     async def _notify(self, message: dict[str, Any]) -> None:
         await self.push_frame(OutputTransportMessageUrgentFrame(message=message))
+
+
+def _message_type(frame: InputTransportMessageFrame) -> str | None:
+    return frame.message.get("type") if isinstance(frame.message, dict) else None

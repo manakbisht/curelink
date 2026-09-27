@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
@@ -67,6 +68,11 @@ class FakeGateway:
         )
 
 
+def playback_done() -> InputTransportMessageFrame:
+    """The browser finished playing everything the bot said."""
+    return InputTransportMessageFrame(message={"type": "playback_done"})
+
+
 def transcript(text: str) -> TranscriptionFrame:
     return TranscriptionFrame(text=text, user_id="player", timestamp=datetime.now(UTC).isoformat())
 
@@ -96,7 +102,7 @@ async def test_greets_player_and_reads_first_sequence():
 
 
 async def test_answer_after_bot_finishes_is_submitted_and_next_round_read():
-    processor, gateway, said, _ = await play([BotStoppedSpeakingFrame(), *user_says("Apple, banana.")])
+    processor, gateway, said, _ = await play([playback_done(), *user_says("Apple, banana.")])
 
     assert [(t, r) for _, t, r in gateway.submissions] == [("Apple, banana.", 1)]
     assert said[-1] == "Correct! That's 20 more points. Round 2. Your 3 words are: tiger, rocket, violin. Your turn."
@@ -104,13 +110,13 @@ async def test_answer_after_bot_finishes_is_submitted_and_next_round_read():
 
 
 async def test_transcripts_are_never_sent_to_tts():
-    _, _, _, down = await play([BotStoppedSpeakingFrame(), *user_says("apple banana")])
+    _, _, _, down = await play([playback_done(), *user_says("apple banana")])
 
     assert not any(isinstance(f, TranscriptionFrame) for f in down)
 
 
 async def test_speech_while_bot_is_reading_is_not_treated_as_an_answer():
-    processor, gateway, _, _ = await play([*user_says("apple"), BotStoppedSpeakingFrame(), SleepFrame(0.05)])
+    processor, gateway, _, _ = await play([*user_says("apple"), playback_done(), SleepFrame(0.05)])
 
     assert gateway.submissions == []
     assert processor.phase is Phase.LISTENING
@@ -118,14 +124,14 @@ async def test_speech_while_bot_is_reading_is_not_treated_as_an_answer():
 
 async def test_empty_turn_is_ignored():
     _, gateway, _, _ = await play(
-        [BotStoppedSpeakingFrame(), UserStartedSpeakingFrame(), UserStoppedSpeakingFrame(), SleepFrame(0.05)]
+        [playback_done(), UserStartedSpeakingFrame(), UserStoppedSpeakingFrame(), SleepFrame(0.05)]
     )
 
     assert gateway.submissions == []
 
 
 async def test_repeat_request_rereads_sequence_without_scoring():
-    processor, gateway, said, _ = await play([BotStoppedSpeakingFrame(), *user_says("Repeat, please?")])
+    processor, gateway, said, _ = await play([playback_done(), *user_says("Repeat, please?")])
 
     assert gateway.submissions == []
     assert said[-1] == "Sure, here they are again. Round 1. Your 2 words are: apple, banana. Your turn."
@@ -133,7 +139,7 @@ async def test_repeat_request_rereads_sequence_without_scoring():
 
 
 async def test_wrong_answer_reveals_sequence_and_finishes():
-    processor, gateway, said, _ = await play([BotStoppedSpeakingFrame(), *user_says("banana apple")])
+    processor, gateway, said, _ = await play([playback_done(), *user_says("banana apple")])
 
     assert len(gateway.submissions) == 1
     assert said[-1] == "Oh no, not quite. The words were: apple, banana. You finished with 0 points."
@@ -142,7 +148,7 @@ async def test_wrong_answer_reveals_sequence_and_finishes():
 
 async def test_turns_after_game_over_are_ignored():
     _, gateway, _, _ = await play(
-        [BotStoppedSpeakingFrame(), *user_says("wrong"), BotStoppedSpeakingFrame(), *user_says("apple banana")]
+        [playback_done(), *user_says("wrong"), playback_done(), *user_says("apple banana")]
     )
 
     assert len(gateway.submissions) == 1
@@ -167,7 +173,7 @@ async def test_host_reactions_lead_into_deterministic_facts():
     processor = MemoryGameProcessor(FakeGateway(), ScriptedHost())
     down, _ = await run_test(
         processor,
-        frames_to_send=[StartGameFrame(), SleepFrame(0.05), BotStoppedSpeakingFrame(), *user_says("apple banana")],
+        frames_to_send=[StartGameFrame(), SleepFrame(0.05), playback_done(), *user_says("apple banana")],
     )
 
     said = spoken(down)
@@ -181,7 +187,7 @@ class TestInterruptions:
             [
                 UserStartedSpeakingFrame(),
                 InterruptionFrame(),
-                BotStoppedSpeakingFrame(),  # audio was cut off
+                playback_done(),  # audio was cut off
                 transcript("apple"),  # early, incomplete answer
                 UserStoppedSpeakingFrame(),
                 SleepFrame(0.05),
@@ -196,9 +202,9 @@ class TestInterruptions:
         processor, gateway, said, _ = await play(
             [
                 InterruptionFrame(),
-                BotStoppedSpeakingFrame(),
+                playback_done(),
                 *user_says("wait"),
-                BotStoppedSpeakingFrame(),  # replay finished
+                playback_done(),  # replay finished
                 *user_says("apple banana"),
             ]
         )
@@ -208,7 +214,7 @@ class TestInterruptions:
 
     async def test_cut_off_sequence_is_replayed_even_if_nothing_was_transcribed(self):
         _, gateway, said, _ = await play(
-            [InterruptionFrame(), BotStoppedSpeakingFrame(), UserStartedSpeakingFrame(), UserStoppedSpeakingFrame(), SleepFrame(0.05)]
+            [InterruptionFrame(), playback_done(), UserStartedSpeakingFrame(), UserStoppedSpeakingFrame(), SleepFrame(0.05)]
         )
 
         assert gateway.submissions == []
@@ -216,8 +222,16 @@ class TestInterruptions:
 
     async def test_interruption_while_listening_is_just_the_answer_starting(self):
         processor, gateway, _, _ = await play(
-            [BotStoppedSpeakingFrame(), InterruptionFrame(), *user_says("apple banana")]
+            [playback_done(), InterruptionFrame(), *user_says("apple banana")]
         )
 
         assert len(gateway.submissions) == 1
         assert processor.phase is Phase.PRESENTING  # reading round 2
+
+
+async def test_server_side_bot_stopped_does_not_open_the_answer_window():
+    """The server sends audio faster than real time; only the browser knows when playback ended."""
+    processor, gateway, _, _ = await play([BotStoppedSpeakingFrame(), *user_says("apple banana")])
+
+    assert gateway.submissions == []
+    assert processor.phase is Phase.PRESENTING
