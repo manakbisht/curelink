@@ -50,7 +50,7 @@ class Round(Base):
     __table_args__ = (UniqueConstraint("session_id", "round_number"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
     round_number: Mapped[int] = mapped_column(Integer)
     sequence: Mapped[list[str]] = mapped_column(JSONB)
     result: Mapped[RoundResult] = mapped_column(_enum(RoundResult, "round_result"), default=RoundResult.PENDING)
