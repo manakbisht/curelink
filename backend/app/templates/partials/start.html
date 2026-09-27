@@ -1,0 +1,11 @@
+<form class="start" hx-post="/ui/sessions" hx-target="#play" hx-disabled-elt="find button">
+  <h2>New game</h2>
+  <label for="player_name">Your name</label>
+  <input id="player_name" name="player_name" maxlength="40" placeholder="Anonymous" autocomplete="nickname">
+  <button class="primary" type="submit">Start game</button>
+  <ul class="tips">
+    <li>You'll need a microphone. Headphones stop the bot hearing itself.</li>
+    <li>Talk over the bot at any time and it will start the round again.</li>
+    <li>Say “repeat” if you want to hear the words again.</li>
+  </ul>
+</form>

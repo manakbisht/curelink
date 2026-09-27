@@ -1,0 +1,30 @@
+<h2>Leaderboard</h2>
+{% if leaderboard %}
+  <ol class="leaderboard">
+    {% for e in leaderboard %}
+      <li>
+        <span class="rank">{{ e.rank }}</span>
+        <span class="name">{{ e.player_name }}</span>
+        <span class="score">{{ e.score }}</span>
+        <span class="muted">{{ e.rounds_cleared }} rd</span>
+      </li>
+    {% endfor %}
+  </ol>
+{% else %}
+  <p class="muted">No finished games yet. Be the first!</p>
+{% endif %}
+
+<h2>Recent games</h2>
+{% if recent %}
+  <ul class="recent">
+    {% for s in recent %}
+      <li>
+        <span class="name">{{ s.player_name }}</span>
+        <span class="score">{{ s.score }}</span>
+        <span class="badge badge-{{ s.status.value | lower }}">{{ s.status.value | title }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="muted">Nothing here yet.</p>
+{% endif %}

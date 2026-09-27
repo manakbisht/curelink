@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
-from app.api import scores, sessions, voice
+from app.api import pages, scores, sessions, voice
 from app.cache.redis import GameCache, create_redis
-from app.core.config import get_settings
+from app.core.config import REPO_ROOT, get_settings
 from app.models.database import engine
 from app.services.game_service import GameError, SessionNotFound
 
@@ -27,6 +28,8 @@ app = FastAPI(title="Memory Card Voice Bot", lifespan=lifespan)
 app.include_router(sessions.router)
 app.include_router(scores.router)
 app.include_router(voice.router)
+app.include_router(pages.router)
+app.mount("/static", StaticFiles(directory=REPO_ROOT / "backend" / "static"), name="static")
 
 
 @app.exception_handler(GameError)

@@ -1,0 +1,12 @@
+<div class="game" data-session-id="{{ session.session_id }}">
+  {% include "partials/game_state.html" %}
+
+  <div class="voice" id="voice"{% if not active %} hidden{% endif %}>
+    <div class="voice-controls">
+      <button id="voice-connect" class="primary" type="button">Start talking</button>
+      <button id="voice-hangup" type="button" hidden>Hang up</button>
+    </div>
+    <p id="voice-status" class="voice-status" data-phase="off">Microphone off</p>
+    <p id="voice-heard" class="voice-heard" aria-label="What the bot heard"></p>
+  </div>
+</div>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memory Cards</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <script src="/static/voice.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <h1>Memory Cards</h1>
+    <p>Listen to the words, then say them back in the same order. Every round adds one more.</p>
+  </header>
+
+  <main class="layout">
+    <section id="play" class="panel" aria-live="polite">
+      {% if session %}
+        {% include "partials/game.html" %}
+      {% else %}
+        {% include "partials/start.html" %}
+      {% endif %}
+    </section>
+
+    <aside id="scores" class="panel" hx-get="/ui/scores" hx-trigger="load, every 15s, game-ended from:body">
+      <p class="muted">Loading scores…</p>
+    </aside>
+  </main>
+</body>
+</html>
