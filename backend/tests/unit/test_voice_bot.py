@@ -89,7 +89,7 @@ async def test_greets_player_and_reads_first_sequence():
     processor, _, said, _ = await play([])
 
     assert len(said) == 1
-    assert said[0].startswith("Hi Ada")
+    assert said[0].startswith("Hi Ada, welcome to Memory Cards! I'll read out some words.")
     assert "Round 1. Your 2 words are: apple, banana." in said[0]
     assert processor.phase is Phase.PRESENTING
 
@@ -135,7 +135,7 @@ async def test_wrong_answer_reveals_sequence_and_finishes():
     processor, gateway, said, _ = await play([BotStoppedSpeakingFrame(), *user_says("banana apple")])
 
     assert len(gateway.submissions) == 1
-    assert "The words were: apple, banana" in said[-1]
+    assert said[-1] == "Oh no, not quite. The words were: apple, banana. You finished with 0 points."
     assert processor.phase is Phase.FINISHED
 
 
@@ -155,3 +155,20 @@ async def test_finished_game_is_announced_instead_of_played():
 
     assert said == ["This game has already finished. Start a new game to play again."]
     assert processor.phase is Phase.FINISHED
+
+
+class ScriptedHost:
+    async def line(self, event, player_name):
+        return f"<{event.value} {player_name}>"
+
+
+async def test_host_reactions_lead_into_deterministic_facts():
+    processor = MemoryGameProcessor(FakeGateway(), ScriptedHost())
+    down, _ = await run_test(
+        processor,
+        frames_to_send=[StartGameFrame(), SleepFrame(0.05), BotStoppedSpeakingFrame(), *user_says("apple banana")],
+    )
+
+    said = spoken(down)
+    assert said[0].startswith("<greeting Ada> I'll read out some words.")
+    assert said[1] == "<correct Ada> That's 20 more points. Round 2. Your 3 words are: tiger, rocket, violin. Your turn."

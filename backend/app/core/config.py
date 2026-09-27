@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     llm_timeout: float = 30
     llm_num_retries: int = 2
     llm_streaming: bool = True
+    # Latency budget for one spoken host line; past it the bot uses a canned line.
+    host_line_timeout: float = 4.0
     llm_extra_params: Annotated[dict[str, Any], NoDecode] = Field(default_factory=dict)
     # Contents of a Google credentials JSON (e.g. an "authorized_user" file),
     # or a path to one. Passed to LiteLLM as `vertex_credentials`.

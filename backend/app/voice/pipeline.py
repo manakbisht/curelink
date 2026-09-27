@@ -26,6 +26,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from app.core.config import Settings
 from app.services.game_service import CARDS
 from app.voice.bot import GameGateway, MemoryGameProcessor, StartGameFrame
+from app.voice.host import HostLLM
 from app.voice.serializer import INPUT_SAMPLE_RATE, OUTPUT_SAMPLE_RATE, BrowserAudioSerializer
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ async def run_voice_session(websocket: WebSocket, gateway: GameGateway, settings
         api_key=settings.deepgram_api_key,
         settings=DeepgramTTSService.Settings(voice=settings.deepgram_tts_voice),
     )
-    game = MemoryGameProcessor(gateway)
+    game = MemoryGameProcessor(gateway, HostLLM(settings))
 
     pipeline = Pipeline([transport.input(), vad, stt, build_user_turns(settings), game, tts, transport.output()])
     task = PipelineTask(
