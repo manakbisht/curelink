@@ -10,6 +10,7 @@ import asyncio
 import enum
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -22,6 +23,9 @@ from app.voice import prompts
 logger = logging.getLogger(__name__)
 
 MAX_LINE_CHARS = 200
+# After a failure, skip the LLM for a while instead of making the player wait
+# out the full timeout on every line.
+FAILURE_COOLDOWN_SECS = 60
 _CARD_PATTERN = re.compile(r"\b(" + "|".join(CARDS) + r")s?\b", re.IGNORECASE)
 
 
@@ -56,6 +60,7 @@ def clean_line(text: str) -> str | None:
 class HostLLM:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._skip_until = 0.0
 
     def _completion_kwargs(self, event: HostEvent, player_name: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -89,10 +94,13 @@ class HostLLM:
 
     async def line(self, event: HostEvent, player_name: str) -> str:
         """A spoken reaction for `event`, always within the latency budget."""
+        if time.monotonic() < self._skip_until:
+            return fallback_line(event, player_name)
         try:
             async with asyncio.timeout(self.settings.host_line_timeout):
                 text = "".join([part async for part in self._generate(event, player_name)])
         except Exception:
-            logger.warning("host line for %s failed, using fallback", event, exc_info=True)
+            logger.warning("host line for %s failed, using fallbacks for %ss", event, FAILURE_COOLDOWN_SECS, exc_info=True)
+            self._skip_until = time.monotonic() + FAILURE_COOLDOWN_SECS
             text = ""
         return clean_line(text) or fallback_line(event, player_name)
