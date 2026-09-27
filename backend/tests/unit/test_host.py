@@ -110,3 +110,13 @@ async def test_line_mentioning_a_card_is_rejected(llm_settings, fake_llm):
 )
 def test_clean_line(raw, cleaned):
     assert clean_line(raw) == cleaned
+
+
+async def test_failure_skips_llm_during_cooldown(llm_settings, fake_llm):
+    calls = fake_llm(RuntimeError("no credentials"))
+    host = HostLLM(llm_settings)
+
+    await host.line(HostEvent.GREETING, "Ada")
+    assert await host.line(HostEvent.CORRECT, "Ada") == "Correct!"
+
+    assert len(calls) == 1
