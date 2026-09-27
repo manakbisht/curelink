@@ -11,3 +11,11 @@ wheels/
 
 # IntelliJ IDEA
 .idea/
+
+# Local configuration / secrets
+.env
+*.credentials.json
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
