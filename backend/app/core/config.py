@@ -1,13 +1,17 @@
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "development"
     log_level: str = "INFO"
