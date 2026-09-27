@@ -7,6 +7,7 @@ from app.cache.redis import GameCache
 from app.core.config import Settings, get_settings
 from app.models.database import get_db
 from app.services.game_service import GameService
+from app.services.leaderboard_service import LeaderboardService
 from app.services.session_service import SessionService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -28,4 +29,9 @@ def get_session_service(game: Annotated[GameService, Depends(get_game_service)],
     return SessionService(game, cache)
 
 
+def get_leaderboard_service(db: DbDep, cache: CacheDep) -> LeaderboardService:
+    return LeaderboardService(db, cache)
+
+
 SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
+LeaderboardServiceDep = Annotated[LeaderboardService, Depends(get_leaderboard_service)]

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from app.api import sessions
+from app.api import scores, sessions
 from app.cache.redis import GameCache, create_redis
 from app.core.config import get_settings
 from app.models.database import engine
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Memory Card Voice Bot", lifespan=lifespan)
 app.include_router(sessions.router)
+app.include_router(scores.router)
 
 
 @app.exception_handler(GameError)
