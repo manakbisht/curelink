@@ -1,0 +1,48 @@
+{% set sid = session.session_id %}
+<div id="game-state" class="game-state" data-status="{{ session.status.value }}"
+  {% if active %}hx-get="/ui/sessions/{{ sid }}" hx-trigger="every 3s, refresh" hx-swap="outerHTML"{% endif %}>
+  <dl class="stats">
+    <div><dt>Player</dt><dd>{{ session.player_name }}</dd></div>
+    <div><dt>Round</dt><dd>{{ session.current_round }}</dd></div>
+    <div><dt>Score</dt><dd>{{ session.score }}</dd></div>
+    <div><dt>Status</dt><dd><span class="badge badge-{{ session.status.value | lower }}">{{ session.status.value | title }}</span></dd></div>
+  </dl>
+
+  {% if active %}
+    <div class="cards" aria-label="{{ session.sequence_length }} cards this round">
+      {% for _ in range(session.sequence_length or 0) %}<span class="card-back"></span>{% endfor %}
+    </div>
+    <p class="muted">Round {{ session.current_round }} has {{ session.sequence_length }} words.</p>
+    <button type="button" class="link-button" hx-post="/ui/sessions/{{ sid }}/end" hx-target="#game-state"
+      hx-swap="outerHTML" hx-confirm="End this game? Your score so far will be saved.">End game</button>
+  {% else %}
+    <div class="result result-{{ session.status.value | lower }}">
+      {% if session.status.value == "FAILED" %}
+        <h2>Game over</h2>
+      {% elif session.rounds and session.rounds[-1].result.value == "CORRECT" %}
+        <h2>You cleared every round!</h2>
+      {% else %}
+        <h2>Game ended</h2>
+      {% endif %}
+      <p>Final score <strong>{{ session.score }}</strong>, {{ rounds_cleared }} round{{ "" if rounds_cleared == 1 else "s" }} cleared.</p>
+    </div>
+
+    {% if session.rounds %}
+      <table class="history">
+        <thead><tr><th>Round</th><th>Words</th><th>You said</th><th>Result</th></tr></thead>
+        <tbody>
+          {% for r in session.rounds %}
+            <tr>
+              <td>{{ r.round_number }}</td>
+              <td>{{ r.sequence | join(", ") if r.sequence else "—" }}</td>
+              <td>{{ r.transcript or "—" }}</td>
+              <td><span class="badge badge-{{ r.result.value | lower }}">{{ r.result.value | title }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <a class="button primary" href="/">Play again</a>
+  {% endif %}
+</div>
