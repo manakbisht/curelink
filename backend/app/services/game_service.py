@@ -148,7 +148,7 @@ class GameService:
     async def get_game(self, session_id: uuid.UUID) -> tuple[GameSession, Round | None]:
         session = await self.sessions.get_by_id(session_id)
         if session is None:
-            raise SessionNotFound(str(session_id))
+            raise SessionNotFound(f"session {session_id} not found")
         return session, await self.rounds.get_current_round(session_id)
 
     async def submit_response(
@@ -182,7 +182,7 @@ class GameService:
         """End a game on the player's request. Idempotent."""
         session = await self.sessions.get_by_id(session_id, for_update=True)
         if session is None:
-            raise SessionNotFound(str(session_id))
+            raise SessionNotFound(f"session {session_id} not found")
         if session.status is SessionStatus.ACTIVE:
             current = await self.rounds.get_current_round(session_id)
             if current is not None and current.result is RoundResult.PENDING:
@@ -197,7 +197,7 @@ class GameService:
         # Lock the session row first so concurrent submissions are processed one at a time.
         session = await self.sessions.get_by_id(session_id, for_update=True)
         if session is None:
-            raise SessionNotFound(str(session_id))
+            raise SessionNotFound(f"session {session_id} not found")
 
         existing = await self.responses.get_by_id(response_id)
         if existing is not None:
