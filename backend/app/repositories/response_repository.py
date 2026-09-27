@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.game import Response
@@ -18,3 +19,6 @@ class ResponseRepository:
 
     async def get_by_id(self, response_id: uuid.UUID) -> Response | None:
         return await self.db.get(Response, response_id)
+
+    async def get_by_round(self, round_id: uuid.UUID) -> Response | None:
+        return (await self.db.execute(select(Response).where(Response.round_id == round_id))).scalar_one_or_none()
