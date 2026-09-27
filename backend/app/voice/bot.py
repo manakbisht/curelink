@@ -35,6 +35,7 @@ from app.schemas.session import GameState
 from app.services.game_service import GameService, normalize_transcript
 from app.services.session_service import SessionService
 from app.voice import prompts
+from app.voice.host import HostEvent, fallback_line
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,17 @@ class Phase(enum.StrEnum):
     LISTENING = "listening"  # waiting for the player's answer
     EVALUATING = "evaluating"  # answer handed to the game service
     FINISHED = "finished"  # game over
+
+
+class Host(Protocol):
+    async def line(self, event: HostEvent, player_name: str) -> str: ...
+
+
+class CannedHost:
+    """Host without an LLM; used when none is configured and in tests."""
+
+    async def line(self, event: HostEvent, player_name: str) -> str:
+        return fallback_line(event, player_name)
 
 
 class GameGateway(Protocol):
@@ -106,9 +118,10 @@ class MemoryGameProcessor(FrameProcessor):
     `TTSSpeakFrame`s for the bot's lines and JSON messages for the UI.
     """
 
-    def __init__(self, gateway: GameGateway, **kwargs: Any) -> None:
+    def __init__(self, gateway: GameGateway, host: Host | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.gateway = gateway
+        self.host = host or CannedHost()
         self.phase = Phase.IDLE
         self.state: GameState | None = None
         self._transcripts: list[str] = []
@@ -153,8 +166,8 @@ class MemoryGameProcessor(FrameProcessor):
             await self._set_phase(Phase.FINISHED)
             await self._say(prompts.game_already_over())
             return
-        intro = prompts.greeting(self.state.player_name) if self.state.current_round == 1 else ""
-        await self._present(intro)
+        welcome = await self._react(HostEvent.GREETING)
+        await self._present(f"{welcome} {prompts.rules()}")
 
     async def _present(self, lead_in: str = "") -> None:
         """Read the current round's sequence. The player may answer once it has been fully spoken."""
@@ -176,7 +189,7 @@ class MemoryGameProcessor(FrameProcessor):
         self._transcripts.clear()
 
         if " ".join(normalize_transcript(transcript)) in REPEAT_REQUESTS:
-            await self._present(prompts.repeat())
+            await self._present(await self._react(HostEvent.REPEAT))
             return
 
         await self._evaluate(transcript)
@@ -190,13 +203,14 @@ class MemoryGameProcessor(FrameProcessor):
         await self._notify({"type": "result", **result.model_dump(mode="json")})
 
         if result.is_correct and self.state.is_active:
-            await self._present(prompts.correct(result.points_awarded))
+            reaction = await self._react(HostEvent.CORRECT)
+            await self._present(f"{reaction} {prompts.points_earned(result.points_awarded)}")
         elif result.is_correct:
             await self._set_phase(Phase.FINISHED)
-            await self._say(prompts.completed(result.score))
+            await self._say(f"{await self._react(HostEvent.COMPLETED)} {prompts.final_score(result.score)}")
         else:
             await self._set_phase(Phase.FINISHED)
-            await self._say(prompts.wrong(result.expected, result.score))
+            await self._say(f"{await self._react(HostEvent.WRONG)} {prompts.reveal(result.expected, result.score)}")
 
     # -- helpers ---------------------------------------------------------------
 
@@ -207,6 +221,10 @@ class MemoryGameProcessor(FrameProcessor):
             except Exception:
                 logger.exception("voice game action failed")
                 await self._notify({"type": "error", "message": "Something went wrong on our side."})
+
+    async def _react(self, event: HostEvent) -> str:
+        assert self.state is not None
+        return await self.host.line(event, self.state.player_name)
 
     async def _say(self, text: str) -> None:
         await self.push_frame(TTSSpeakFrame(text, append_to_context=False))
