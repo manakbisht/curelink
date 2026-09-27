@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
@@ -57,6 +58,7 @@ class UserTurnEndedFrame(DataFrame):
 class Phase(enum.StrEnum):
     IDLE = "idle"  # not started yet
     PRESENTING = "presenting"  # bot is reading the sequence
+    INTERRUPTED = "interrupted"  # player talked over the sequence; it will be read again
     LISTENING = "listening"  # waiting for the player's answer
     EVALUATING = "evaluating"  # answer handed to the game service
     FINISHED = "finished"  # game over
@@ -157,6 +159,8 @@ class MemoryGameProcessor(FrameProcessor):
             await self.queue_frame(UserTurnEndedFrame())
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._on_bot_stopped_speaking()
+        elif isinstance(frame, InterruptionFrame):
+            await self._on_interruption()
 
     # -- conversation flow ---------------------------------------------------
 
@@ -182,11 +186,25 @@ class MemoryGameProcessor(FrameProcessor):
             self._transcripts.clear()
             await self._set_phase(Phase.LISTENING)
 
+    async def _on_interruption(self) -> None:
+        # Every user turn broadcasts an interruption; it only matters while the
+        # sequence is being read. TTS and the browser have already dropped the
+        # rest of the audio, so the player has not heard the full sequence.
+        if self.phase is Phase.PRESENTING:
+            self._transcripts.clear()
+            await self._set_phase(Phase.INTERRUPTED)
+
     async def _on_user_turn_end(self) -> None:
         transcript = " ".join(self._transcripts).strip()
+        self._transcripts.clear()
+
+        if self.phase is Phase.INTERRUPTED:
+            # Whatever they said (an early answer, "wait", a cough) is not scored:
+            # read the same round again from the start.
+            await self._present(await self._react(HostEvent.INTERRUPTED))
+            return
         if self.phase is not Phase.LISTENING or not transcript:
             return
-        self._transcripts.clear()
 
         if " ".join(normalize_transcript(transcript)) in REPEAT_REQUESTS:
             await self._present(await self._react(HostEvent.REPEAT))

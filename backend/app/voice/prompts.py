@@ -21,6 +21,7 @@ _EVENT_DESCRIPTIONS = {
     "wrong": "The player just got the sequence wrong, so the game is over. Be kind.",
     "completed": "The player cleared the final round and won the game. Celebrate.",
     "repeat": "The player asked to hear the sequence again. Reassure them briefly.",
+    "interrupted": "The player spoke while you were reading the sequence, so you will read it again from the start.",
 }
 
 

@@ -31,6 +31,7 @@ class HostEvent(enum.StrEnum):
     WRONG = "wrong"
     COMPLETED = "completed"
     REPEAT = "repeat"
+    INTERRUPTED = "interrupted"
 
 
 def fallback_line(event: HostEvent, player_name: str) -> str:
@@ -40,6 +41,7 @@ def fallback_line(event: HostEvent, player_name: str) -> str:
         HostEvent.WRONG: "Oh no, not quite.",
         HostEvent.COMPLETED: "Incredible, you cleared every round!",
         HostEvent.REPEAT: "Sure, here they are again.",
+        HostEvent.INTERRUPTED: "No problem, let me start that again.",
     }[event]
 
 
