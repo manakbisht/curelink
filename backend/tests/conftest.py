@@ -70,3 +70,24 @@ def cache(redis, settings):
     from app.cache.redis import GameCache
 
     return GameCache(redis, game_ttl=settings.game_state_ttl, leaderboard_ttl=settings.leaderboard_ttl)
+
+
+@pytest.fixture
+async def client(session_factory, cache, settings):
+    """HTTP client for the app, wired to the test database, fake Redis and test settings."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.config import get_settings
+    from app.main import app
+    from app.models.database import get_db
+
+    async def _get_db():
+        async with session_factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = _get_db
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.state.cache = cache
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        yield http
+    app.dependency_overrides.clear()
