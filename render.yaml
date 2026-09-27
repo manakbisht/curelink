@@ -1,0 +1,47 @@
+# Render Blueprint: one web service (FastAPI + Pipecat), PostgreSQL and Key Value (Valkey).
+# Secrets marked `sync: false` are prompted for when the Blueprint is first applied.
+services:
+  - type: web
+    name: memory-cards
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: memory-cards-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: memory-cards-cache
+          property: connectionString
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: vertex_ai/gemini-2.5-flash
+      - key: LLM_TEMPERATURE
+        value: "0.2"
+      - key: LLM_TIMEOUT
+        value: "30"
+      - key: LLM_NUM_RETRIES
+        value: "2"
+      - key: LLM_STREAMING
+        value: "true"
+      # e.g. {"vertex_project": "my-project", "vertex_location": "asia-south1"}
+      - key: LLM_EXTRA_PARAMS
+        sync: false
+      # JSON contents of the Google credentials file (authorized_user or service account).
+      - key: VERTEX_CREDENTIALS
+        sync: false
+
+  - type: keyvalue
+    name: memory-cards-cache
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # internal connections only
+
+databases:
+  - name: memory-cards-db
+    plan: free
