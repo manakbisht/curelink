@@ -53,3 +53,20 @@ async def _clean_tables(request: pytest.FixtureRequest) -> AsyncIterator[None]:
 @pytest.fixture
 def rng() -> random.Random:
     return random.Random(1234)
+
+
+@pytest.fixture
+async def redis():
+    from fakeredis import FakeAsyncRedis
+
+    client = FakeAsyncRedis(decode_responses=True)
+    yield client
+    await client.flushall()
+    await client.aclose()
+
+
+@pytest.fixture
+def cache(redis, settings):
+    from app.cache.redis import GameCache
+
+    return GameCache(redis, game_ttl=settings.game_state_ttl, leaderboard_ttl=settings.leaderboard_ttl)
